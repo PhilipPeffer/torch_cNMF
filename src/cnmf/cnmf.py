@@ -332,7 +332,8 @@ class cNMF():
 
     def prepare(self, counts_fn, components, n_iter = 100, densify=False, tpm_fn=None, seed=None,
                         beta_loss='frobenius',num_highvar_genes=2000, genes_file=None,
-                        alpha_usage=0.0, alpha_spectra=0.0, init='random', max_NMF_iter=1000):
+                        alpha_usage=0.0, alpha_spectra=0.0, init='random', max_NMF_iter=1000,
+                        use_torch=False):
         """
         Load input counts, reduce to high-variance genes, and variance normalize genes.
         Prepare file for distributing jobs over workers.
@@ -377,6 +378,10 @@ class cNMF():
 
         max_NMF_iter : int, optional (default=1000)
             Maximum number of iterations per individual NMF run
+
+        use_torch : bool, optional (default=False)
+            If True, use the torchnmf PyTorch backend instead of sklearn. Enables GPU
+            acceleration when a CUDA device is available. Requires ``pip install torchnmf``.
         """
         
         
@@ -455,7 +460,8 @@ class cNMF():
         self.save_norm_counts(norm_counts)
         (replicate_params, run_params) = self.get_nmf_iter_params(ks=components, n_iter=n_iter, random_state_seed=seed,
                                                                   beta_loss=beta_loss, alpha_usage=alpha_usage,
-                                                                  alpha_spectra=alpha_spectra, init=init, max_iter=max_NMF_iter)
+                                                                  alpha_spectra=alpha_spectra, init=init, max_iter=max_NMF_iter,
+                                                                  use_torch=use_torch)
         self.save_nmf_iter_params(replicate_params, run_params)
         
     
@@ -565,7 +571,8 @@ class cNMF():
                                random_state_seed = None,
                                beta_loss = 'kullback-leibler',
                                alpha_usage=0.0, alpha_spectra=0.0,
-                               init='random', max_iter=1000):
+                               init='random', max_iter=1000,
+                               use_torch=False):
         """
         Create a DataFrame with parameters for NMF iterations.
 
@@ -623,7 +630,8 @@ class cNMF():
                         solver='mu',
                         tol=1e-4,
                         max_iter=max_iter,
-                        init=init
+                        init=init,
+                        use_torch=use_torch,
                         )
         
         ## Coordinate descent is faster than multiplicative update but only works for frobenius
@@ -662,16 +670,134 @@ class cNMF():
         """
         Parameters
         ----------
-        X : pandas.DataFrame,
-            Normalized counts dataFrame to be factorized.
+        X : numpy.ndarray or scipy.sparse matrix
+            Normalized counts matrix to be factorized.
 
-        nmf_kwargs : dict,
-            Arguments to be passed to ``non_negative_factorization``
-
+        nmf_kwargs : dict
+            Arguments controlling factorization. The key ``use_torch`` selects
+            the backend: False (default) uses sklearn ``non_negative_factorization``;
+            True uses the torchnmf PyTorch backend (see ``_nmf_torch``).
         """
-        (usages, spectra, niter) = non_negative_factorization(X, **nmf_kwargs)
+        nmf_kwargs = dict(nmf_kwargs)  # shallow copy — never mutate caller's dict
+        use_torch = nmf_kwargs.pop('use_torch', False)
 
-        return(spectra, usages)
+        if use_torch:
+            return self._nmf_torch(X, nmf_kwargs)
+
+        (usages, spectra, niter) = non_negative_factorization(X, **nmf_kwargs)
+        return (spectra, usages)
+
+
+    def _nmf_torch(self, X, nmf_kwargs):
+        """
+        PyTorch/GPU-backed NMF using the torchnmf library.
+
+        Parameters
+        ----------
+        X : numpy.ndarray or scipy.sparse matrix, shape (cells, genes)
+            Normalized counts to factorize.
+
+        nmf_kwargs : dict
+            Subset of the sklearn-style kwargs dict (with ``use_torch`` already
+            stripped by the caller). Recognised keys: n_components, random_state,
+            beta_loss, tol, max_iter, alpha_W, alpha_H, l1_ratio, init, solver,
+            H (fixed spectra for refit_usage), update_H.
+
+        Returns
+        -------
+        spectra : numpy.ndarray, shape (K, genes)
+        usages  : numpy.ndarray, shape (cells, K)
+        """
+        try:
+            from torchnmf.nmf import NMF as TorchNMF
+        except ImportError:
+            raise ImportError(
+                "torchnmf is required for the PyTorch backend. "
+                "Install it with: pip install torchnmf"
+            )
+
+        import torch
+
+        nmf_kwargs = dict(nmf_kwargs)  # local copy
+
+        n_components  = nmf_kwargs.pop('n_components')
+        random_state  = nmf_kwargs.pop('random_state', None)
+        beta_loss_str = nmf_kwargs.pop('beta_loss', 'frobenius')
+        tol           = nmf_kwargs.pop('tol', 1e-4)
+        max_iter      = nmf_kwargs.pop('max_iter', 1000)
+        alpha_W       = nmf_kwargs.pop('alpha_W', 0.0)
+        alpha_H       = nmf_kwargs.pop('alpha_H', 0.0)
+        l1_ratio      = nmf_kwargs.pop('l1_ratio', 0.0)
+        init          = nmf_kwargs.pop('init', 'random')
+        nmf_kwargs.pop('solver', None)           # not used by torchnmf
+        fixed_spectra = nmf_kwargs.pop('H', None)
+        update_H      = nmf_kwargs.pop('update_H', True)
+
+        if init == 'nndsvd':
+            warnings.warn(
+                "init='nndsvd' is not supported by the torchnmf backend; "
+                "using random initialization instead.",
+                UserWarning,
+            )
+
+        if alpha_W != alpha_H:
+            warnings.warn(
+                f"torchnmf uses a single regularization alpha for both factors. "
+                f"alpha_W={alpha_W} will be used; alpha_H={alpha_H} is ignored.",
+                UserWarning,
+            )
+
+        _beta_map = {'frobenius': 2, 'kullback-leibler': 1, 'itakura-saito': 0}
+        if beta_loss_str not in _beta_map:
+            raise ValueError(
+                f"Unsupported beta_loss '{beta_loss_str}'. "
+                f"Must be one of: {list(_beta_map)}"
+            )
+        beta = _beta_map[beta_loss_str]
+
+        if random_state is not None:
+            torch.manual_seed(int(random_state))
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Convert input matrix to float32 tensor (sparse or dense)
+        if sp.issparse(X):
+            X_coo = X.astype(np.float32).tocoo()
+            indices = torch.from_numpy(
+                np.vstack([X_coo.row, X_coo.col]).astype(np.int64)
+            )
+            values = torch.from_numpy(X_coo.data)
+            V = torch.sparse_coo_tensor(
+                indices, values, size=X_coo.shape, dtype=torch.float32
+            ).to(device)
+        else:
+            V = torch.tensor(np.array(X, dtype=np.float32), device=device)
+
+        n_cells, n_genes = V.shape
+
+        # Build model — fix spectra (W in torchnmf) when refit_usage calls us
+        refit_mode = (fixed_spectra is not None) and (not update_H)
+        if refit_mode:
+            # fixed_spectra is K×genes (sklearn H convention)
+            # torchnmf W is genes×K, so W = fixed_spectra.T
+            spectra_arr = np.array(fixed_spectra, dtype=np.float32)
+            W_init = torch.tensor(spectra_arr.T, device=device)  # genes×K
+            model = TorchNMF(
+                Vshape=(n_cells, n_genes),
+                rank=n_components,
+                W=W_init,
+                trainable_W=False,
+            )
+        else:
+            model = TorchNMF(Vshape=(n_cells, n_genes), rank=n_components)
+
+        model.fit(V, beta=beta, tol=tol, max_iter=max_iter, alpha=alpha_W, l1_ratio=l1_ratio)
+
+        # torchnmf convention: V ≈ H @ W^T, W is genes×K, H is cells×K
+        # sklearn convention: spectra = K×genes, usages = cells×K
+        spectra = model.W.data.cpu().numpy().T   # K×genes
+        usages  = model.H.data.cpu().numpy()     # cells×K
+        return (spectra, usages)
 
 
     def factorize_multi_process(self, total_workers):
@@ -1217,8 +1343,8 @@ def main():
         output_dir="./cnmf_test/"
 
 
-        python cnmf.py prepare --output-dir $output_dir \
-           --name test --counts ./cnmf_test/test_data.df.npz \
+        python cnmf.py prepare --output-dir $output_dir \\
+           --name test --counts ./cnmf_test/test_data.df.npz \\
            -k 6 7 8 9 --n-iter 5
 
         python cnmf.py factorize  --name test --output-dir $output_dir

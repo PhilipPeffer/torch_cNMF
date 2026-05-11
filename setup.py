@@ -47,5 +47,8 @@ setuptools.setup(
    'palettable',
    'scipy',
    'pyyaml'
-   ]
+   ],
+    extras_require={
+        'torch': ['torchnmf'],
+    }
 )
