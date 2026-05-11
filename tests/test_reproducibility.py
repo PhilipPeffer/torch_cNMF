@@ -188,5 +188,37 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
             print(f'PASSES: {ref_fn}')                
         else:
             warnings.warn('SKIPPING: {test_fn} as not in the tested output files', UserWarning)
-            
+
             (f'SKIPPING: {test_fn}')
+
+
+def test_torch_backend_reproducible(tmp_path):
+    """Given the same seed, two torch-backend runs must produce bit-for-bit identical
+    iter spectra. This verifies that torch.manual_seed(nmf_seed) makes each
+    individual NMF run fully deterministic (guaranteed on CPU; may require
+    torch.use_deterministic_algorithms(True) on GPU).
+    """
+    np.random.seed(42)
+    data = np.random.binomial(n=100, p=0.01, size=(50, 200)).astype(np.int64)
+    adata = sc.AnnData(X=sp.csr_matrix(data))
+    counts_fn = str(tmp_path / "counts.h5ad")
+    adata.write_h5ad(counts_fn)
+
+    k, n_iter, seed = 3, 3, 14
+
+    cnmf1 = cNMF(output_dir=str(tmp_path), name="run1")
+    cnmf1.prepare(counts_fn, components=[k], n_iter=n_iter, seed=seed, use_torch=True)
+    cnmf1.factorize()
+
+    cnmf2 = cNMF(output_dir=str(tmp_path), name="run2")
+    cnmf2.prepare(counts_fn, components=[k], n_iter=n_iter, seed=seed, use_torch=True)
+    cnmf2.factorize()
+
+    run_params = load_df_from_npz(cnmf1.paths['nmf_replicate_parameters'])
+    for _, row in run_params.iterrows():
+        spec1 = load_df_from_npz(cnmf1.paths['iter_spectra'] % (row['n_components'], row['iter']))
+        spec2 = load_df_from_npz(cnmf2.paths['iter_spectra'] % (row['n_components'], row['iter']))
+        assert spec1.equals(spec2), (
+            f"Torch backend produced different spectra for k={row['n_components']}, "
+            f"iter={row['iter']} with the same seed"
+        )
