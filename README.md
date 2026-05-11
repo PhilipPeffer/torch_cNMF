@@ -22,6 +22,16 @@ pip install harmonypy
 pip install scikit-misc
 ```
 
+## Optional: PyTorch GPU backend
+
+An optional PyTorch-based NMF backend is available via the [torchnmf](https://github.com/yoyolicoris/torchnmf) library. It automatically uses a CUDA GPU when one is available, falling back to CPU otherwise.
+
+```bash
+pip install cnmf[torch]
+# or equivalently:
+pip install torchnmf
+```
+
 # Running cNMF
 
 cNMF can be run from the command line without any parallelization using the example commands below:
@@ -52,6 +62,36 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 ```
 
 For the Python environment approach, `usage` will contain the usage matrix with each cell normalized to sum to 1. `spectra_scores` contains the gene_spectra_scores output (aka Z-score unit gene expression matrix), `spectra_tpm` contains the GEP spectra in units of TPM and `top_genes` contains an ordered list of the top 100 associated genes for each program.
+
+## PyTorch GPU backend
+
+Pass `use_torch=True` to `prepare()` to enable the PyTorch backend for all factorization steps. The flag is persisted in the run-parameters file, so `factorize()`, `combine()`, and `consensus()` all pick it up automatically without any further changes.
+
+```python
+from cnmf import cNMF
+import numpy as np
+
+cnmf_obj = cNMF(output_dir="./example_data", name="example_cNMF")
+cnmf_obj.prepare(
+    counts_fn="./example_data/counts_prefiltered.txt",
+    components=np.arange(5, 14),
+    n_iter=100,
+    seed=14,
+    use_torch=True,   # <-- enables PyTorch backend
+)
+cnmf_obj.factorize()   # runs on GPU if available, CPU otherwise
+cnmf_obj.combine()
+cnmf_obj.k_selection_plot()
+cnmf_obj.consensus(k=10, density_threshold=0.01)
+usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, density_threshold=0.01)
+```
+
+**Notes:**
+- Requires `pip install torchnmf` (or `pip install cnmf[torch]`).
+- GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
+- `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.
+- `init='nndsvd'` is not supported by torchnmf and falls back to random initialization with a warning.
+- If `alpha_usage` and `alpha_spectra` differ, `alpha_usage` is used for both factors and a warning is emitted (torchnmf applies a single regularization alpha to both W and H).
 
 Output data files will all be available in the ./example_data/example_cNMF directory including:
 
@@ -103,6 +143,9 @@ cnmf_obj_corrected.prepare(counts_fn='./example_islets/batchcorrect_example.Corr
 ```
 
 # Change log
+
+### New in version 1.8
+- Optional PyTorch/GPU backend via torchnmf. Enable with `use_torch=True` in `prepare()`. Automatically uses CUDA when available.
 
 ### New in version 1.7
 - Use scipy hierachical clsutering grather than fastcluster for compatibility with numpy>2.0
