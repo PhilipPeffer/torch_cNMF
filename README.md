@@ -91,6 +91,7 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 - **Recommended only when a CUDA GPU is available.** On CPU, the torch backend is slower than sklearn (benchmarks show 1.2–7x slower depending on k), because sklearn's BLAS-backed float64 implementation outperforms PyTorch's per-operation dispatch overhead on CPU. The performance advantage of the torch backend comes from GPU matrix multiplications, which are typically 10–50x faster than CPU for the matrix sizes encountered in NMF.
 - GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
 - `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.
+- Results are computed in **float32** (vs float64 for sklearn). Outputs are numerically comparable but not bit-for-bit identical between backends; this is acceptable because cNMF averages over many random restarts in the consensus step.
 - `init='nndsvd'` is not supported by torchnmf and falls back to random initialization with a warning.
 - If `alpha_usage` and `alpha_spectra` differ, `alpha_usage` is used for both factors and a warning is emitted (torchnmf applies a single regularization alpha to both W and H).
 

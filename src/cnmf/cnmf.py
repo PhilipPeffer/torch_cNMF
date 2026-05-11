@@ -707,6 +707,14 @@ class cNMF():
         -------
         spectra : numpy.ndarray, shape (K, genes)
         usages  : numpy.ndarray, shape (cells, K)
+
+        Notes
+        -----
+        torchnmf operates in float32. Returned spectra and usages are therefore
+        float32, unlike the float64 values produced by the sklearn backend. This
+        is acceptable because cNMF averages over many random restarts in the
+        consensus step, but be aware of the precision difference if comparing
+        outputs between backends.
         """
         try:
             from torchnmf.nmf import NMF as TorchNMF
@@ -729,7 +737,13 @@ class cNMF():
         alpha_H       = nmf_kwargs.pop('alpha_H', 0.0)
         l1_ratio      = nmf_kwargs.pop('l1_ratio', 0.0)
         init          = nmf_kwargs.pop('init', 'random')
-        nmf_kwargs.pop('solver', None)           # not used by torchnmf
+        solver = nmf_kwargs.pop('solver', 'mu')
+        if solver != 'mu':
+            warnings.warn(
+                f"solver='{solver}' is not supported by the torchnmf backend; "
+                "multiplicative updates ('mu') will be used instead.",
+                UserWarning,
+            )
         fixed_spectra = nmf_kwargs.pop('H', None)
         update_H      = nmf_kwargs.pop('update_H', True)
 
@@ -760,22 +774,19 @@ class cNMF():
 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # Convert input matrix to float32 tensor (sparse or dense)
+        # Convert input matrix to float32 dense tensor.
+        # torchnmf expects a dense tensor; passing sparse causes invariant-check
+        # warnings and offers no performance benefit inside torchnmf's MU updates.
         if sp.issparse(X):
-            X_coo = X.astype(np.float32).tocoo()
-            indices = torch.from_numpy(
-                np.vstack([X_coo.row, X_coo.col]).astype(np.int64)
-            )
-            values = torch.from_numpy(X_coo.data)
-            V = torch.sparse_coo_tensor(
-                indices, values, size=X_coo.shape, dtype=torch.float32
-            ).to(device)
+            V = torch.tensor(X.toarray().astype(np.float32), device=device)
         else:
             V = torch.tensor(np.array(X, dtype=np.float32), device=device)
 
         n_cells, n_genes = V.shape
 
-        # Build model — fix spectra (W in torchnmf) when refit_usage calls us
+        # Fix spectra when refit_usage calls us with H=spectra, update_H=False.
+        # (Passing H with update_H=True is a warm-start pattern; we don't attempt
+        # to translate that here — it would require initialising torchnmf's H too.)
         refit_mode = (fixed_spectra is not None) and (not update_H)
         if refit_mode:
             # fixed_spectra is K×genes (sklearn H convention)

@@ -38,16 +38,16 @@ setuptools.setup(
         ],
     },
     install_requires=[
-   'scikit-learn>=1.0',
-   'anndata>=0.9',
-   'scanpy',
-   'pandas',
-   'numpy',
-   'matplotlib',
-   'palettable',
-   'scipy',
-   'pyyaml'
-   ],
+        'scikit-learn>=1.0',
+        'anndata>=0.9',
+        'scanpy',
+        'pandas',
+        'numpy',
+        'matplotlib',
+        'palettable',
+        'scipy',
+        'pyyaml',
+    ],
     extras_require={
         'torch': ['torchnmf'],
     }

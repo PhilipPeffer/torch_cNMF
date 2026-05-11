@@ -120,7 +120,6 @@ def test_factorize_torch(tmp_path):
     cnmf_obj.prepare(counts_fn, components=[3], n_iter=2, use_torch=True)
     cnmf_obj.factorize()
 
-    import pandas as pd
     run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
     for _, row in run_params.iterrows():
         spectra_path = cnmf_obj.paths['iter_spectra'] % (row['n_components'], row['iter'])
@@ -195,3 +194,59 @@ def test_nmf_torch_import_error(mock_cnmf, tmp_path):
     with patch.dict('sys.modules', {'torchnmf': None, 'torchnmf.nmf': None}):
         with pytest.raises(ImportError, match="torchnmf"):
             mock_cnmf._nmf_torch(norm_counts.X, nmf_kwargs)
+
+
+def test_nmf_torch_warns_solver(mock_cnmf, tmp_path):
+    """_nmf_torch must warn when solver != 'mu' (unsupported by torchnmf)."""
+    counts_fn = generate_counts_file(tmp_path, "h5ad", np.int64)
+    mock_cnmf.prepare(counts_fn, components=[3], n_iter=1, use_torch=True)
+
+    run_params = load_df_from_npz(mock_cnmf.paths['nmf_replicate_parameters'])
+    nmf_kwargs = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    nmf_kwargs['random_state'] = int(run_params.iloc[0]['nmf_seed'])
+    nmf_kwargs['n_components'] = int(run_params.iloc[0]['n_components'])
+    nmf_kwargs['solver'] = 'cd'
+    nmf_kwargs.pop('use_torch')
+
+    norm_counts = sc.read(mock_cnmf.paths['normalized_counts'])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mock_cnmf._nmf_torch(norm_counts.X, nmf_kwargs)
+
+    messages = [str(w.message) for w in caught]
+    assert any("solver" in m for m in messages), \
+        f"Expected solver warning, got: {messages}"
+
+
+def test_nmf_torch_kl_divergence(tmp_path):
+    """factorize() with use_torch=True and beta_loss='kullback-leibler' must complete."""
+    counts_fn = generate_counts_file(tmp_path, "h5ad", np.int64)
+    cnmf_obj = cNMF(output_dir=str(tmp_path), name="torch_kl_test")
+    cnmf_obj.prepare(counts_fn, components=[3], n_iter=2,
+                     use_torch=True, beta_loss='kullback-leibler')
+    cnmf_obj.factorize()
+
+    run_params = load_df_from_npz(cnmf_obj.paths['nmf_replicate_parameters'])
+    for _, row in run_params.iterrows():
+        spectra_path = cnmf_obj.paths['iter_spectra'] % (row['n_components'], row['iter'])
+        assert os.path.exists(spectra_path), f"Missing iter spectra file: {spectra_path}"
+
+
+def test_torch_consensus_refit_usage(tmp_path):
+    """consensus() with use_torch=True must complete and produce output files,
+    exercising the refit_usage fixed-spectra code path in _nmf_torch."""
+    counts_fn = generate_counts_file(tmp_path, "h5ad", np.int64)
+    cnmf_obj = cNMF(output_dir=str(tmp_path), name="torch_consensus_test")
+    k = 3
+    # n_iter=15 ensures n_neighbors=int(0.3*15/3)=1, avoiding division-by-zero
+    # in the density calculation inside consensus()
+    cnmf_obj.prepare(counts_fn, components=[k], n_iter=15, seed=42, use_torch=True)
+    cnmf_obj.factorize()
+    cnmf_obj.combine()
+    cnmf_obj.consensus(k=k, density_threshold=0.5, show_clustering=False)
+
+    ldthresh_str = "0_5"
+    for fn_key in ['consensus_spectra', 'consensus_usages', 'gene_spectra_score', 'gene_spectra_tpm']:
+        path = cnmf_obj.paths[fn_key] % (k, ldthresh_str)
+        assert os.path.exists(path), f"Missing consensus output: {path}"
