@@ -802,6 +802,7 @@ class cNMF():
         else:
             model = TorchNMF(Vshape=(n_cells, n_genes), rank=n_components)
 
+        model = model.to(device)
         model.fit(V, beta=beta, tol=tol, max_iter=max_iter, alpha=alpha_W, l1_ratio=l1_ratio)
 
         # torchnmf convention: V ≈ H @ W^T, W is genes×K, H is cells×K
