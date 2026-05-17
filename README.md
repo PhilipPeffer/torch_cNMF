@@ -26,6 +26,8 @@ pip install scikit-misc
 
 An optional PyTorch-based NMF backend is available via the [torchnmf](https://github.com/yoyolicoris/torchnmf) library. It automatically uses a CUDA GPU when one is available, falling back to CPU otherwise.
 
+First install PyTorch for your hardware by following the instructions at [pytorch.org/get-started](https://pytorch.org/get-started/locally/) (choose your OS, CUDA version, or ROCm as appropriate). Then install the torchnmf dependency:
+
 ```bash
 pip install cnmf[torch]
 # or equivalently:
