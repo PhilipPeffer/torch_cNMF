@@ -135,11 +135,11 @@ def test_nmf_torch_warns_nndsvd(mock_cnmf, tmp_path):
     mock_cnmf.prepare(counts_fn, components=[3], n_iter=1, init='nndsvd', use_torch=True)
 
     run_params = load_df_from_npz(mock_cnmf.paths['nmf_replicate_parameters'])
-    nmf_kwargs = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    with open(mock_cnmf.paths['nmf_run_parameters']) as f:
+        nmf_kwargs = yaml.safe_load(f)
     nmf_kwargs['random_state'] = int(run_params.iloc[0]['nmf_seed'])
     nmf_kwargs['n_components'] = int(run_params.iloc[0]['n_components'])
 
-    import scanpy as sc
     norm_counts = sc.read(mock_cnmf.paths['normalized_counts'])
     use_torch = nmf_kwargs.pop('use_torch')
     assert use_torch is True
@@ -160,11 +160,11 @@ def test_nmf_torch_warns_alpha_mismatch(mock_cnmf, tmp_path):
                       alpha_usage=0.1, alpha_spectra=0.5, use_torch=True)
 
     run_params = load_df_from_npz(mock_cnmf.paths['nmf_replicate_parameters'])
-    nmf_kwargs = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    with open(mock_cnmf.paths['nmf_run_parameters']) as f:
+        nmf_kwargs = yaml.safe_load(f)
     nmf_kwargs['random_state'] = int(run_params.iloc[0]['nmf_seed'])
     nmf_kwargs['n_components'] = int(run_params.iloc[0]['n_components'])
 
-    import scanpy as sc
     norm_counts = sc.read(mock_cnmf.paths['normalized_counts'])
     nmf_kwargs.pop('use_torch')
 
@@ -183,12 +183,12 @@ def test_nmf_torch_import_error(mock_cnmf, tmp_path):
     mock_cnmf.prepare(counts_fn, components=[3], n_iter=1, use_torch=True)
 
     run_params = load_df_from_npz(mock_cnmf.paths['nmf_replicate_parameters'])
-    nmf_kwargs = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    with open(mock_cnmf.paths['nmf_run_parameters']) as f:
+        nmf_kwargs = yaml.safe_load(f)
     nmf_kwargs['random_state'] = int(run_params.iloc[0]['nmf_seed'])
     nmf_kwargs['n_components'] = int(run_params.iloc[0]['n_components'])
     nmf_kwargs.pop('use_torch')
 
-    import scanpy as sc
     norm_counts = sc.read(mock_cnmf.paths['normalized_counts'])
 
     with patch.dict('sys.modules', {'torchnmf': None, 'torchnmf.nmf': None}):
@@ -202,7 +202,8 @@ def test_nmf_torch_warns_solver(mock_cnmf, tmp_path):
     mock_cnmf.prepare(counts_fn, components=[3], n_iter=1, use_torch=True)
 
     run_params = load_df_from_npz(mock_cnmf.paths['nmf_replicate_parameters'])
-    nmf_kwargs = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    with open(mock_cnmf.paths['nmf_run_parameters']) as f:
+        nmf_kwargs = yaml.safe_load(f)
     nmf_kwargs['random_state'] = int(run_params.iloc[0]['nmf_seed'])
     nmf_kwargs['n_components'] = int(run_params.iloc[0]['n_components'])
     nmf_kwargs['solver'] = 'cd'
@@ -244,9 +245,10 @@ def test_torch_consensus_refit_usage(tmp_path):
     cnmf_obj.prepare(counts_fn, components=[k], n_iter=15, seed=42, use_torch=True)
     cnmf_obj.factorize()
     cnmf_obj.combine()
-    cnmf_obj.consensus(k=k, density_threshold=0.5, show_clustering=False)
+    density_threshold = 0.5
+    cnmf_obj.consensus(k=k, density_threshold=density_threshold, show_clustering=False)
 
-    ldthresh_str = "0_5"
+    ldthresh_str = str(density_threshold).replace('.', '_')
     for fn_key in ['consensus_spectra', 'consensus_usages', 'gene_spectra_score', 'gene_spectra_tpm']:
         path = cnmf_obj.paths[fn_key] % (k, ldthresh_str)
         assert os.path.exists(path), f"Missing consensus output: {path}"

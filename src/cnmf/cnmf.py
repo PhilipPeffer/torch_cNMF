@@ -1388,7 +1388,8 @@ def main():
     parser.add_argument('--max-nmf-iter', type=int, help='[prepare] Max number of iterations per individual NMF run (default 1000)', default=1000)
     parser.add_argument('--beta-loss', type=str, choices=['frobenius', 'kullback-leibler', 'itakura-saito'], help='[prepare] Loss function for NMF (default frobenius)', default='frobenius')
     parser.add_argument('--init', type=str, choices=['random', 'nndsvd'], help='[prepare] Initialization algorithm for NMF (default random)', default='random')
-    parser.add_argument('--densify', dest='densify', help='[prepare] Treat the input data as non-sparse (default False)', action='store_true', default=False) 
+    parser.add_argument('--densify', dest='densify', help='[prepare] Treat the input data as non-sparse (default False)', action='store_true', default=False)
+    parser.add_argument('--use-torch', dest='use_torch', help='[prepare] Use the PyTorch/torchnmf backend instead of sklearn (default False). Enables GPU acceleration when a CUDA device is present. Requires pip install torchnmf.', action='store_true', default=False)
     parser.add_argument('--worker-index', type=int, help='[factorize] Index of current worker (the first worker should have index 0)', default=0)
     parser.add_argument('--skip-completed-runs', action='store_true', help='[factorize] Skip previously completed runs. Must re-run prepare first to update completed runs', default=False)
     parser.add_argument('--local-density-threshold', type=float, help='[consensus] Threshold for the local density filtering. This string must convert to a float >0 and <=2', default=0.5)
@@ -1404,7 +1405,8 @@ def main():
     if args.command == 'prepare':
         cnmf_obj.prepare(args.counts, components=args.components, n_iter=args.n_iter, densify=args.densify,
                          tpm_fn=args.tpm, seed=args.seed, beta_loss=args.beta_loss, max_NMF_iter=args.max_nmf_iter,
-                         num_highvar_genes=args.numgenes, genes_file=args.genes_file, init=args.init)
+                         num_highvar_genes=args.numgenes, genes_file=args.genes_file, init=args.init,
+                         use_torch=args.use_torch)
 
     elif args.command == 'factorize':
         cnmf_obj.factorize(worker_i=args.worker_index, total_workers=args.total_workers,

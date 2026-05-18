@@ -3,10 +3,11 @@
 Benchmark the sklearn vs PyTorch NMF backends in cNMF.
 
 Measures wall-clock time and reconstruction error for each backend across
-one or more values of K (number of components).  Requires the venv that
-has PyTorch installed:
+one or more values of K (number of components).
 
-    /home/philip/.virtualenvs/bin/python Extras/benchmark_backends.py [options]
+Usage (from the repo root, in an environment with cnmf and torchnmf installed):
+
+    python Extras/benchmark_backends.py [options]
 
 Install torchnmf first if needed:
     pip install torchnmf
