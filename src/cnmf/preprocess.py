@@ -392,7 +392,7 @@ class Preprocess():
 
         try:
             import harmonypy
-        except:
+        except ImportError:
             raise ImportError("harmonypy is not installed. Please install it using 'pip install harmonypy' before proceeding.")
             
         harmony_res = harmonypy.run_harmony(pca, obs, harmony_vars, max_iter_harmony = max_iter_harmony,

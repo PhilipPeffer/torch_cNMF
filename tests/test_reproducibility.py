@@ -2,8 +2,7 @@ import pytest
 import os
 import shutil
 import numpy as np
-import pandas as pd
-from cnmf import cNMF, load_df_from_npz, save_df_to_npz
+from cnmf import cNMF, load_df_from_npz
 import scanpy as sc
 import scipy.sparse as sp
 import yaml

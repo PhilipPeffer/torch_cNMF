@@ -1,22 +1,23 @@
 #!/usr/bin/env python
 
-import numpy as np
-import pandas as pd
-import os, errno, sys
+import os
+import errno
 import datetime
 import uuid
 import itertools
 import yaml
 import subprocess
-import scipy.sparse as sp
 import warnings
+
+import numpy as np
+import pandas as pd
+import scipy.sparse as sp
 
 from scipy.spatial.distance import squareform
 from sklearn.decomposition import non_negative_factorization
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import euclidean_distances
-from sklearn.utils import sparsefuncs
 from sklearn.preprocessing import StandardScaler
 
 from scipy.cluster.hierarchy import leaves_list, linkage
@@ -653,7 +654,7 @@ class cNMF():
             else:
                 replicate_params.at[i, 'completed'] = True
                 
-        remaining = (replicate_params['completed'] == False).sum()
+        remaining = (~replicate_params['completed']).sum()
         print('{n} NMF runs are currently incomplete'.format(n=remaining))
         
         self.save_nmf_iter_params(replicate_params, _nmf_kwargs)
@@ -867,7 +868,7 @@ class cNMF():
         if not skip_completed_runs:
             jobs_for_this_worker = worker_filter(range(len(run_params)), worker_i, total_workers)
         else:
-            jobs_for_this_worker = worker_filter(run_params.index[run_params['completed']==False],
+            jobs_for_this_worker = worker_filter(run_params.index[~run_params['completed']],
                                                  worker_i, total_workers)
     
         for idx in jobs_for_this_worker:
@@ -1337,7 +1338,7 @@ class cNMF():
         
         try:
             usage.columns = [int(x) for x in usage.columns]
-        except:
+        except ValueError:
             print('Usage matrix columns include non integer values')
     
         top_genes = []
@@ -1371,7 +1372,7 @@ def main():
 
     """
 
-    import sys, argparse
+    import argparse
     parser = argparse.ArgumentParser()
 
     parser.add_argument('command', type=str, choices=['prepare', 'factorize', 'combine', 'consensus', 'k_selection_plot'])
@@ -1426,7 +1427,6 @@ def main():
             ks = args.components
 
         for k in ks:
-            merged_spectra = load_df_from_npz(cnmf_obj.paths['merged_spectra']%k)
             cnmf_obj.consensus(k, args.local_density_threshold, args.local_neighborhood_size, args.show_clustering,
                                args.build_reference, close_clustergram_fig=True)
 
