@@ -27,9 +27,11 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
+    python_requires='>=3.11',
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
     entry_points={
