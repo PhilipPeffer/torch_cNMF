@@ -31,5 +31,8 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[torch]"
 
+      - name: Verify torchnmf import
+        run: python -c "import torchnmf; import torch; print('torch:', torch.__version__, '| torchnmf:', torchnmf.__version__)"
+
       - name: Run tests
-        run: pytest tests/test_prepare.py -v --tb=short
+        run: pytest tests/test_prepare.py -v --tb=long

@@ -28,6 +28,8 @@ jobs:
         run: docker build -t cnmf -f Extras/Dockerfile .
 
       - name: Run tests inside container
+        # Skip torch tests — the image intentionally excludes torchnmf.
+        # The torch backend is tested separately in the Tests workflow.
         run: |
           docker run --rm cnmf \
-            python -m pytest tests/test_prepare.py -v --tb=short
+            python -m pytest tests/test_prepare.py -v --tb=short -k "not torch"
