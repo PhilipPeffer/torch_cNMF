@@ -52,5 +52,6 @@ setuptools.setup(
     ],
     extras_require={
         'torch': ['torchnmf'],
+        'test': ['pytest'],
     }
 )

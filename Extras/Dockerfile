@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy source and install in editable mode so the cnmf CLI is on PATH
 WORKDIR /opt/cnmf
 COPY . .
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[test]"
 
 WORKDIR /data
 ENTRYPOINT []
