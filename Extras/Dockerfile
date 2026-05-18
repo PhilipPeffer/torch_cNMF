@@ -1,29 +1,40 @@
-#Download base image ubuntu 16.04
-FROM ubuntu:16.04
+# cNMF Docker image (sklearn backend)
+#
+# Builds a self-contained environment for running cNMF with the default
+# sklearn NMF backend.  PyTorch is intentionally excluded because the correct
+# wheel depends on the host GPU driver (CUDA version).  See the README for
+# instructions on adding GPU support at build time or at runtime.
+#
+# Build:
+#   docker build -t cnmf -f Extras/Dockerfile .
+#
+# Run (interactive):
+#   docker run --rm -it -v /path/to/data:/data cnmf
+#
+# Run (single command):
+#   docker run --rm -v /path/to/data:/data cnmf \
+#     cnmf prepare --output-dir /data --name my_run -c /data/counts.h5ad \
+#     -k 7 8 9 10 --n-iter 100 --seed 14
 
-SHELL ["/bin/bash", "-c"]
+FROM python:3.11-slim
 
-# Updating Ubuntu packages
-RUN apt-get update && yes|apt-get upgrade
+LABEL maintainer="PhilipPeffer" \
+      description="Consensus NMF (cNMF) for scRNA-seq — sklearn backend"
 
-# Adding wget, bzip2, parallel, git
-RUN apt-get install -y wget bzip2 parallel git-core
+# System dependencies needed by scanpy / scipy / matplotlib
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        libhdf5-dev \
+        pkg-config \
+        git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Anaconda installing
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-RUN bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/miniconda3
-RUN rm Miniconda3-latest-Linux-x86_64.sh
+# Copy source and install in editable mode so the cnmf CLI is on PATH
+WORKDIR /opt/cnmf
+COPY . .
+RUN pip install --no-cache-dir -e .
 
-# Set path to conda
-ENV PATH /opt/miniconda3/bin:$PATH
-
-# Updating conda packages
-RUN conda update conda -y
-
-# Prepare cNMF env
-RUN echo "source activate cnmf_env" > ~/.bashrc
-RUN conda create -n cnmf_env --yes --channel bioconda --channel conda-forge --channel defaults python==3.7 fastcluster==1.1.26 matplotlib==3.3.2 numpy==1.19.2 palettable==3.3.0 pandas==1.1.3 scipy==1.5.2 scikit-learn==0.23.2 pyyaml==5.3.1 scanpy==1.6.0 parallel && conda clean --yes --all
-
-# Download cNMF
-WORKDIR /home
-RUN git clone https://github.com/dylkot/cNMF.git
+WORKDIR /data
+ENTRYPOINT []
+CMD ["/bin/bash"]

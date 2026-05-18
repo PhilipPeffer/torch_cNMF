@@ -34,6 +34,26 @@ pip install cnmf[torch]
 pip install torchnmf
 ```
 
+### Docker: adding GPU support
+
+The Docker image (`Extras/Dockerfile`) ships only the sklearn backend. To add GPU support, install PyTorch and torchnmf on top of it — either at build time by extending the image, or at runtime inside the container.
+
+**At runtime** (quickest, but not persistent across container restarts):
+```bash
+docker run --rm -it --gpus all -v /path/to/data:/data cnmf
+# inside the container:
+pip install torchnmf torch --index-url https://download.pytorch.org/whl/cu124
+```
+
+**At build time** (bake it into a derived image — replace `cu124` with your CUDA version, e.g. `cu118`, `cu121`, or `rocm6.2` for AMD):
+```dockerfile
+FROM cnmf
+RUN pip install --no-cache-dir torchnmf torch \
+      --index-url https://download.pytorch.org/whl/cu124
+```
+
+Find the correct index URL for your driver at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/). The right CUDA version to use is determined by your host GPU driver, not the container — run `nvidia-smi` on the host to check.
+
 # Running cNMF
 
 cNMF can be run from the command line without any parallelization using the example commands below:
