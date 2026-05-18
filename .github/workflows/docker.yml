@@ -1,0 +1,33 @@
+name: Docker build and test
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths:
+      - "Extras/Dockerfile"
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "Extras/Dockerfile"
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t cnmf -f Extras/Dockerfile .
+
+      - name: Run tests inside container
+        run: |
+          docker run --rm cnmf \
+            python -m pytest tests/test_prepare.py -v --tb=short
