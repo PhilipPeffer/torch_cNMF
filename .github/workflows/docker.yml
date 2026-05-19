@@ -31,5 +31,5 @@ jobs:
         # Skip torch tests — the image intentionally excludes torchnmf.
         # The torch backend is tested separately in the Tests workflow.
         run: |
-          docker run --rm cnmf \
+          docker run --rm -w /opt/cnmf cnmf \
             python -m pytest tests/test_prepare.py -v --tb=short -k "not torch"
