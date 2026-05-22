@@ -1,6 +1,51 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel"
-]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "cnmf"
+dynamic = ["version"]
+authors = [
+    {name = "Dylan Kotliar", email = "dylkot@gmail.com"},
+]
+description = "Consensus NMF for scRNA-Seq data"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "scikit-learn>=1.0",
+    "anndata>=0.9",
+    "scanpy",
+    "pandas",
+    "numpy",
+    "matplotlib",
+    "palettable",
+    "scipy",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+torch = ["torchnmf"]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/PhilipPeffer/torch_cNMF"
+"Bug Tracker" = "https://github.com/PhilipPeffer/torch_cNMF/issues"
+
+[project.scripts]
+cnmf = "cnmf:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "cnmf.version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.uv]
+dev-dependencies = ["ruff"]

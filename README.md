@@ -9,7 +9,13 @@ We have also created a tutorial for running cNMF from R. See the [Rmd notebook](
 # Installation
 cNMF requires Python 3.11+ and scikit-learn>=1.0, scanpy>=1.8, and AnnData>=0.9
 
-You can install with [pip](https://pypi.org/):
+Install with [uv](https://docs.astral.sh/uv/) (recommended):
+
+```bash
+uv pip install cnmf
+```
+
+or with pip:
 
 ```bash
 pip install cnmf
@@ -18,8 +24,8 @@ pip install cnmf
 If you want to use the batch correction preprocessing, you also need to install the [Python implementation of Harmony](https://github.com/slowkow/harmonypy) and scikit-misc
 
 ```bash
-pip install harmonypy
-pip install scikit-misc
+uv pip install harmonypy scikit-misc
+# or: pip install harmonypy scikit-misc
 ```
 
 ## Optional: PyTorch GPU backend
@@ -29,9 +35,8 @@ An optional PyTorch-based NMF backend is available via the [torchnmf](https://gi
 First install PyTorch for your hardware by following the instructions at [pytorch.org/get-started](https://pytorch.org/get-started/locally/) (choose your OS, CUDA version, or ROCm as appropriate). Then install the torchnmf dependency:
 
 ```bash
-pip install cnmf[torch]
-# or equivalently:
-pip install torchnmf
+uv pip install "cnmf[torch]"
+# or: pip install cnmf[torch]
 ```
 
 ### Docker: adding GPU support
@@ -109,7 +114,7 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 ```
 
 **Notes:**
-- Requires `pip install torchnmf` (or `pip install cnmf[torch]`).
+- Requires `uv pip install "cnmf[torch]"` (or `pip install cnmf[torch]`).
 - **Recommended for large K (≥10) when a CUDA or ROCm GPU is available.** At small K, parallel sklearn workers outperform sequential GPU calls because each job converges quickly. At large K the GPU's per-call efficiency dominates: 3–4× faster than 24 parallel sklearn workers on PBMC3k (see benchmark below).
 - GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
 - `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.

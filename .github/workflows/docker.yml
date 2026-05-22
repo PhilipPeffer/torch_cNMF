@@ -7,14 +7,14 @@ on:
       - "Extras/Dockerfile"
       - "src/**"
       - "tests/**"
-      - "setup.py"
+      - "pyproject.toml"
   pull_request:
     branches: ["main"]
     paths:
       - "Extras/Dockerfile"
       - "src/**"
       - "tests/**"
-      - "setup.py"
+      - "pyproject.toml"
 
 jobs:
   docker-test:

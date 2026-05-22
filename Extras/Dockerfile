@@ -30,10 +30,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy uv binary from the official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # Copy source and install in editable mode so the cnmf CLI is on PATH
 WORKDIR /opt/cnmf
 COPY . .
-RUN pip install --no-cache-dir -e ".[test]"
+RUN uv pip install --system --no-cache -e ".[test]"
 
 WORKDIR /data
 ENTRYPOINT []

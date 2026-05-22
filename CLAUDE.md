@@ -6,31 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Install (editable/dev mode, sklearn backend only):**
 ```bash
-pip install -e .
+uv sync
 ```
 
 **Install with PyTorch backend support:**
 ```bash
-pip install -e ".[torch]"
-# or equivalently: pip install torchnmf
+uv sync --extra torch
+```
+
+**Install all extras (torch + test/dev tools):**
+```bash
+uv sync --extra torch --extra test
 ```
 
 **Run all tests:**
 ```bash
-pytest -vs tests
+uv run pytest -vs tests
 # or
 ./run_tests.sh
 ```
 
 **Run a single test file or test:**
 ```bash
-pytest -vs tests/test_prepare.py
-pytest -vs tests/test_prepare.py::test_factorize_torch
+uv run pytest -vs tests/test_prepare.py
+uv run pytest -vs tests/test_prepare.py::test_factorize_torch
 ```
 
 **Download reference data required by reproducibility tests** (must be run before `test_reproducibility.py`):
 ```bash
-python download_pytest_data.py
+uv run python download_pytest_data.py
 ```
 
 ## Architecture
@@ -64,7 +68,7 @@ The dispatch point is `_nmf(X, nmf_kwargs)`. It pops `use_torch` from the kwargs
 - Operates in float64.
 
 **PyTorch backend (`use_torch=True`) — `_nmf_torch()`:**
-- Requires `pip install torchnmf` (optional dependency).
+- Requires `uv sync --extra torch` (or `pip install torchnmf`).
 - Automatically uses CUDA when available, falls back to CPU.
 - Operates in **float32** (not float64 like sklearn) — outputs are numerically comparable but not bit-for-bit identical between backends.
 - Convention translation: torchnmf uses `V ≈ H @ W^T` (W is genes×K, H is cells×K); the method transposes W to match cNMF's sklearn convention (spectra K×genes, usages cells×K).
