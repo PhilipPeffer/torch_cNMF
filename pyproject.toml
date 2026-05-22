@@ -47,5 +47,5 @@ version = {attr = "cnmf.version.__version__"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.uv]
-dev-dependencies = ["ruff"]
+[dependency-groups]
+dev = ["ruff"]
