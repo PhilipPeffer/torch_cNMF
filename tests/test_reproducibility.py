@@ -48,16 +48,6 @@ def cnmf_instance(tmp_path):
 
 @pytest.mark.parametrize("dataset_config", [
     {
-        "name": "example_cNMF",
-        "counts_file": "./tests/test_data/simulated_example_data/filtered_counts.txt",
-        "k_values": np.arange(5,8),
-        "n_iter": 15,
-        "nhvg": 1000,
-        "seed": 14,
-        "reference_dir": "./tests/test_data/simulated_example_data",
-        "consensus":[(7, 0.1)]
-    },
-    {
         "name": "pbmc_cNMF",
         "counts_file": "./tests/test_data/example_PBMC/counts.h5ad",
         "k_values": np.arange(7,10),

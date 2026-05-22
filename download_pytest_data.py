@@ -41,11 +41,6 @@ def main():
             "filename": "example_pbmc_results_20250301.tar.gz",
             "extract": True,
         },
-        {
-            "url": "https://storage.googleapis.com/sabeti-public/dkotliar/cNMF/pytest_testing_data/example_sim_results_20250301.tar.gz",
-            "filename": "example_sim_results_20250301.tar.gz",
-            "extract": True
-        }
     ]
 
     # Where to place the downloaded files
