@@ -177,9 +177,14 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
         elif file_ext == '.yaml':
             with open(test_fn, "r") as f:
                 test_yaml = yaml.safe_load(f)
-                
+
             with open(ref_fn, "r") as f:
                 orig_yaml = yaml.safe_load(f)
+
+            # use_torch was added after the reference data was generated;
+            # strip it before comparing so old references stay valid.
+            test_yaml.pop('use_torch', None)
+            orig_yaml.pop('use_torch', None)
 
             assert dicts_equal(test_yaml, orig_yaml), (
                 f"{ref_fn} does not match."

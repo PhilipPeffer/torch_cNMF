@@ -102,3 +102,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Large data files (downloaded/generated, not tracked)
+example_PBMC/
+tests/test_data/
+*.tar.gz
+*.h5ad
+benchmark_results.csv

@@ -110,12 +110,25 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 
 **Notes:**
 - Requires `pip install torchnmf` (or `pip install cnmf[torch]`).
-- **Recommended only when a CUDA GPU is available.** On CPU, the torch backend is slower than sklearn (benchmarks show 1.2–7x slower depending on k), because sklearn's BLAS-backed float64 implementation outperforms PyTorch's per-operation dispatch overhead on CPU. The performance advantage of the torch backend comes from GPU matrix multiplications, which are typically 10–50x faster than CPU for the matrix sizes encountered in NMF.
+- **Recommended only when a CUDA or ROCm GPU is available.** On CPU, the torch backend is 1.2–7× slower than sklearn because sklearn's BLAS-backed float64 NMF outperforms PyTorch's per-operation overhead on CPU.
 - GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
 - `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.
 - Results are computed in **float32** (vs float64 for sklearn). Outputs are numerically comparable but not bit-for-bit identical between backends; this is acceptable because cNMF averages over many random restarts in the consensus step.
 - `init='nndsvd'` is not supported by torchnmf and falls back to random initialization with a warning.
 - If `alpha_usage` and `alpha_spectra` differ, `alpha_usage` is used for both factors and a warning is emitted (torchnmf applies a single regularization alpha to both W and H).
+
+### GPU benchmark (PBMC3k, 2700 cells × 2000 HVGs, AMD Radeon RX 7800 XT)
+
+Measured with `Extras/benchmark_backends.py`, 3 timing runs per (backend, K), frobenius loss.
+
+| K  | sklearn (s)     | torch/GPU (s)   | speedup | sklearn err | torch err |
+|----|-----------------|-----------------|---------|-------------|-----------|
+| 5  | 0.228 ± 0.088   | 0.076 ± 0.011   | 3.0×    | 2.242e+03   | 2.242e+03 |
+| 7  | 0.217 ± 0.012   | 0.071 ± 0.011   | 3.1×    | 2.232e+03   | 2.233e+03 |
+| 10 | 1.420 ± 1.376   | 0.076 ± 0.013   | 18.8×   | 2.222e+03   | 2.228e+03 |
+| 15 | 3.043 ± 1.257   | 0.070 ± 0.013   | 43.3×   | 2.210e+03   | 2.213e+03 |
+
+Reconstruction errors (Frobenius norm) are comparable between backends despite the float32 vs float64 difference. Speedup grows with K because the GPU's parallel matrix multiplications scale better than sklearn's sequential coordinate descent.
 
 Output data files will all be available in the ./example_data/example_cNMF directory including:
 
