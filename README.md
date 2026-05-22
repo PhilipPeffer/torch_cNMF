@@ -7,7 +7,7 @@ cNMF is a pipeline for inferring gene expression programs from scRNA-Seq. It tak
 We have also created a tutorial for running cNMF from R. See the [Rmd notebook](Tutorials/R_vignette.Rmd) or the [compiled html](Tutorials/R_vignette.nb.html) for this.
 
 # Installation
-cNMF has been tested with Python 3.7 and 3.10 and requires scikit-learn>=1.0, scanpy>=1.8, and AnnData>=0.9
+cNMF requires Python 3.11+ and scikit-learn>=1.0, scanpy>=1.8, and AnnData>=0.9
 
 You can install with [pip](https://pypi.org/):
 
@@ -21,6 +21,38 @@ If you want to use the batch correction preprocessing, you also need to install 
 pip install harmonypy
 pip install scikit-misc
 ```
+
+## Optional: PyTorch GPU backend
+
+An optional PyTorch-based NMF backend is available via the [torchnmf](https://github.com/yoyolicoris/torchnmf) library. It automatically uses a CUDA GPU when one is available, falling back to CPU otherwise.
+
+First install PyTorch for your hardware by following the instructions at [pytorch.org/get-started](https://pytorch.org/get-started/locally/) (choose your OS, CUDA version, or ROCm as appropriate). Then install the torchnmf dependency:
+
+```bash
+pip install cnmf[torch]
+# or equivalently:
+pip install torchnmf
+```
+
+### Docker: adding GPU support
+
+The Docker image (`Extras/Dockerfile`) ships only the sklearn backend. To add GPU support, install PyTorch and torchnmf on top of it — either at build time by extending the image, or at runtime inside the container.
+
+**At runtime** (quickest, but not persistent across container restarts):
+```bash
+docker run --rm -it --gpus all -v /path/to/data:/data cnmf
+# inside the container:
+pip install torchnmf torch --index-url https://download.pytorch.org/whl/cu124
+```
+
+**At build time** (bake it into a derived image — replace `cu124` with your CUDA version, e.g. `cu118`, `cu121`, or `rocm6.2` for AMD):
+```dockerfile
+FROM cnmf
+RUN pip install --no-cache-dir torchnmf torch \
+      --index-url https://download.pytorch.org/whl/cu124
+```
+
+Find the correct index URL for your driver at [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/). The right CUDA version to use is determined by your host GPU driver, not the container — run `nvidia-smi` on the host to check.
 
 # Running cNMF
 
@@ -52,6 +84,56 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 ```
 
 For the Python environment approach, `usage` will contain the usage matrix with each cell normalized to sum to 1. `spectra_scores` contains the gene_spectra_scores output (aka Z-score unit gene expression matrix), `spectra_tpm` contains the GEP spectra in units of TPM and `top_genes` contains an ordered list of the top 100 associated genes for each program.
+
+## PyTorch GPU backend
+
+Pass `use_torch=True` to `prepare()` to enable the PyTorch backend for all factorization steps. The flag is persisted in the run-parameters file, so `factorize()`, `combine()`, and `consensus()` all pick it up automatically without any further changes.
+
+```python
+from cnmf import cNMF
+import numpy as np
+
+cnmf_obj = cNMF(output_dir="./example_data", name="example_cNMF")
+cnmf_obj.prepare(
+    counts_fn="./example_data/counts_prefiltered.txt",
+    components=np.arange(5, 14),
+    n_iter=100,
+    seed=14,
+    use_torch=True,   # <-- enables PyTorch backend
+)
+cnmf_obj.factorize()   # runs on GPU if available, CPU otherwise
+cnmf_obj.combine()
+cnmf_obj.k_selection_plot()
+cnmf_obj.consensus(k=10, density_threshold=0.01)
+usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, density_threshold=0.01)
+```
+
+**Notes:**
+- Requires `pip install torchnmf` (or `pip install cnmf[torch]`).
+- **Recommended for large K (≥10) when a CUDA or ROCm GPU is available.** At small K, parallel sklearn workers outperform sequential GPU calls because each job converges quickly. At large K the GPU's per-call efficiency dominates: 3–4× faster than 24 parallel sklearn workers on PBMC3k (see benchmark below).
+- GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
+- `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.
+- Results are computed in **float32** (vs float64 for sklearn). Outputs are numerically comparable but not bit-for-bit identical between backends; this is acceptable because cNMF averages over many random restarts in the consensus step.
+- `init='nndsvd'` is not supported by torchnmf and falls back to random initialization with a warning.
+- If `alpha_usage` and `alpha_spectra` differ, `alpha_usage` is used for both factors and a warning is emitted (torchnmf applies a single regularization alpha to both W and H).
+
+### GPU benchmark (PBMC3k, 2700 cells × 2000 HVGs, AMD Radeon RX 7800 XT)
+
+Measured with `Extras/benchmark_backends.py`, frobenius loss.  Both backends complete 24 NMF iterations
+per K: sklearn uses `factorize(worker_i=i, total_workers=24)` across 24 parallel processes (identical
+to `cnmf factorize --total-workers 24 --worker-index i`); torch runs all 24 iterations sequentially
+in one process on the GPU.  Speedup < 1 means sklearn is faster; > 1 means GPU wins.
+
+| K  | sklearn total (24w) | torch total (GPU) | speedup |
+|----|---------------------|-------------------|---------|
+| 5  | 0.924s              | 1.806s            | 0.5×    |
+| 7  | 0.842s              | 1.651s            | 0.5×    |
+| 10 | 5.047s              | 1.604s            | 3.1×    |
+| 15 | 6.739s              | 1.673s            | 4.0×    |
+
+At small K, 24 parallel sklearn workers finish 24 short jobs in roughly one job's time and beat the GPU.
+At large K, the GPU's per-call efficiency dominates: torch completes 24 sequential iterations faster
+than sklearn workers finish their individually slower jobs.
 
 Output data files will all be available in the ./example_data/example_cNMF directory including:
 
@@ -103,6 +185,9 @@ cnmf_obj_corrected.prepare(counts_fn='./example_islets/batchcorrect_example.Corr
 ```
 
 # Change log
+
+### New in version 1.8
+- Optional PyTorch/GPU backend via torchnmf. Enable with `use_torch=True` in `prepare()`. Automatically uses CUDA when available.
 
 ### New in version 1.7
 - Use scipy hierachical clsutering grather than fastcluster for compatibility with numpy>2.0

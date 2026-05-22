@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "setup.py"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[torch,test]"
+
+      - name: Verify torchnmf import
+        run: python -c "import torchnmf; import torch; print('torch:', torch.__version__, '| torchnmf:', torchnmf.__version__)"
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=long

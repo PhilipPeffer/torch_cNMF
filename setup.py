@@ -21,15 +21,17 @@ setuptools.setup(
     description="Consensus NMF for scRNA-Seq data",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/dylkot/cNMF",
+    url="https://github.com/PhilipPeffer/torch_cNMF",
     project_urls={
-        "Bug Tracker": "https://github.com/dylkot/cNMF/issues",
+        "Bug Tracker": "https://github.com/PhilipPeffer/torch_cNMF/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.11",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
+    python_requires='>=3.11',
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
     entry_points={
@@ -38,14 +40,18 @@ setuptools.setup(
         ],
     },
     install_requires=[
-   'scikit-learn>=1.0',
-   'anndata>=0.9',
-   'scanpy',
-   'pandas',
-   'numpy',
-   'matplotlib',
-   'palettable',
-   'scipy',
-   'pyyaml'
-   ]
+        'scikit-learn>=1.0',
+        'anndata>=0.9',
+        'scanpy',
+        'pandas',
+        'numpy',
+        'matplotlib',
+        'palettable',
+        'scipy',
+        'pyyaml',
+    ],
+    extras_require={
+        'torch': ['torchnmf'],
+        'test': ['pytest'],
+    }
 )

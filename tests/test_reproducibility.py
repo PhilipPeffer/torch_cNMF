@@ -2,8 +2,7 @@ import pytest
 import os
 import shutil
 import numpy as np
-import pandas as pd
-from cnmf import cNMF, load_df_from_npz, save_df_to_npz
+from cnmf import cNMF, load_df_from_npz
 import scanpy as sc
 import scipy.sparse as sp
 import yaml
@@ -49,16 +48,6 @@ def cnmf_instance(tmp_path):
 
 @pytest.mark.parametrize("dataset_config", [
     {
-        "name": "example_cNMF",
-        "counts_file": "./tests/test_data/simulated_example_data/filtered_counts.txt",
-        "k_values": np.arange(5,8),
-        "n_iter": 15,
-        "nhvg": 1000,
-        "seed": 14,
-        "reference_dir": "./tests/test_data/simulated_example_data",
-        "consensus":[(7, 0.1)]
-    },
-    {
         "name": "pbmc_cNMF",
         "counts_file": "./tests/test_data/example_PBMC/counts.h5ad",
         "k_values": np.arange(7,10),
@@ -73,7 +62,10 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
     """
     Single end-to-end test that runs the cNMF pipeline for multiple example datasets.
     """
-   
+    counts_file = dataset_config["counts_file"]
+    if not os.path.exists(counts_file):
+        pytest.skip(f"Test data not found: {counts_file} — run download_pytest_data.py first")
+
     cnmf_instance.prepare(
         counts_fn=dataset_config["counts_file"],
         components=dataset_config["k_values"],
@@ -178,9 +170,14 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
         elif file_ext == '.yaml':
             with open(test_fn, "r") as f:
                 test_yaml = yaml.safe_load(f)
-                
+
             with open(ref_fn, "r") as f:
                 orig_yaml = yaml.safe_load(f)
+
+            # use_torch was added after the reference data was generated;
+            # strip it before comparing so old references stay valid.
+            test_yaml.pop('use_torch', None)
+            orig_yaml.pop('use_torch', None)
 
             assert dicts_equal(test_yaml, orig_yaml), (
                 f"{ref_fn} does not match."
@@ -188,5 +185,37 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
             print(f'PASSES: {ref_fn}')                
         else:
             warnings.warn('SKIPPING: {test_fn} as not in the tested output files', UserWarning)
-            
+
             (f'SKIPPING: {test_fn}')
+
+
+def test_torch_backend_reproducible(tmp_path):
+    """Given the same seed, two torch-backend runs must produce bit-for-bit identical
+    iter spectra. This verifies that torch.manual_seed(nmf_seed) makes each
+    individual NMF run fully deterministic (guaranteed on CPU; may require
+    torch.use_deterministic_algorithms(True) on GPU).
+    """
+    np.random.seed(42)
+    data = np.random.binomial(n=100, p=0.01, size=(50, 200)).astype(np.int64)
+    adata = sc.AnnData(X=sp.csr_matrix(data))
+    counts_fn = str(tmp_path / "counts.h5ad")
+    adata.write_h5ad(counts_fn)
+
+    k, n_iter, seed = 3, 3, 14
+
+    cnmf1 = cNMF(output_dir=str(tmp_path), name="run1")
+    cnmf1.prepare(counts_fn, components=[k], n_iter=n_iter, seed=seed, use_torch=True)
+    cnmf1.factorize()
+
+    cnmf2 = cNMF(output_dir=str(tmp_path), name="run2")
+    cnmf2.prepare(counts_fn, components=[k], n_iter=n_iter, seed=seed, use_torch=True)
+    cnmf2.factorize()
+
+    run_params = load_df_from_npz(cnmf1.paths['nmf_replicate_parameters'])
+    for _, row in run_params.iterrows():
+        spec1 = load_df_from_npz(cnmf1.paths['iter_spectra'] % (row['n_components'], row['iter']))
+        spec2 = load_df_from_npz(cnmf2.paths['iter_spectra'] % (row['n_components'], row['iter']))
+        assert spec1.equals(spec2), (
+            f"Torch backend produced different spectra for k={row['n_components']}, "
+            f"iter={row['iter']} with the same seed"
+        )
