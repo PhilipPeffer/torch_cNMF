@@ -109,7 +109,8 @@ def test_prepare_torch_flag_persisted_in_yaml(mock_cnmf, tmp_path, use_torch):
     counts_fn = generate_counts_file(tmp_path, "h5ad", np.int64)
     mock_cnmf.prepare(counts_fn, components=[3], n_iter=2, use_torch=use_torch)
 
-    run_params = yaml.safe_load(open(mock_cnmf.paths['nmf_run_parameters']))
+    with open(mock_cnmf.paths['nmf_run_parameters']) as f:
+        run_params = yaml.safe_load(f)
     assert run_params['use_torch'] is use_torch
 
 

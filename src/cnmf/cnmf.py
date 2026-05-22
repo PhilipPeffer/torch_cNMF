@@ -727,8 +727,6 @@ class cNMF():
 
         import torch
 
-        nmf_kwargs = dict(nmf_kwargs)  # local copy
-
         n_components  = nmf_kwargs.pop('n_components')
         random_state  = nmf_kwargs.pop('random_state', None)
         beta_loss_str = nmf_kwargs.pop('beta_loss', 'frobenius')
