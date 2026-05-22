@@ -2,20 +2,23 @@
 """
 Benchmark the sklearn vs PyTorch NMF backends in cNMF.
 
-Measures total wall-clock time and reconstruction error for each backend
-across one or more values of K (number of components).
+Measures total wall-clock time for the factorize() step using the package's
+built-in parallelisation:
 
-For sklearn, ``--n-timing-runs`` jobs are distributed across ``--n-workers``
-processes (default: os.cpu_count()), each pinned to 1 BLAS thread via
-threadpoolctl.  This mirrors how cNMF's ``factorize --total-workers N``
-actually parallelises on a multi-core CPU host.
+  sklearn: n_workers parallel processes, each calling
+           factorize(worker_i=i, total_workers=n_workers)
+           — identical to running
+               cnmf factorize --total-workers N --worker-index i
+           from the command line.
 
-For torch/GPU, the same number of jobs run sequentially in one process; the
-GPU provides internal parallelism.  Comparing total wall-clock time for the
-same number of jobs gives a fair apples-to-apples throughput comparison.
+  torch/GPU: single process calling factorize(worker_i=0, total_workers=1),
+             with the GPU providing internal parallelism per NMF call.
 
-Usage (from the repo root, in an environment with cnmf and torchnmf installed):
+Both backends complete the same total number of NMF iterations (--n-iter),
+so reported wall-clock times reflect end-to-end factorize throughput including
+disk I/O, which is what users actually experience.
 
+Usage (from the repo root):
     python Extras/benchmark_backends.py [options]
 
 Install torchnmf first if needed:
@@ -24,49 +27,34 @@ Install torchnmf first if needed:
 
 import argparse
 import os
+import sys
 import time
 import shutil
 import tempfile
-import warnings
-from multiprocessing import Pool
+from multiprocessing import Process
 
 import numpy as np
 import scipy.sparse as sp
-import yaml
 
 from cnmf import cNMF
 
 
 # ---------------------------------------------------------------------------
-# Pool initializer + picklable sklearn worker
-# Must be module-level so multiprocessing can pickle them on non-fork platforms.
+# Worker — must be module-level so multiprocessing can pickle it
 # ---------------------------------------------------------------------------
 
-_SHARED_X = None  # set once per worker process by _pool_init
-
-
-def _pool_init(X):
-    global _SHARED_X
-    _SHARED_X = X
-
-
-def _sklearn_nmf_worker(nmf_kwargs):
-    """Run one sklearn NMF call in a pool worker, pinned to 1 BLAS thread."""
-    import warnings as _w
-    from sklearn.decomposition import non_negative_factorization as _nnmf
-    kw = dict(nmf_kwargs)
-    kw.pop('use_torch', None)
-    try:
-        from threadpoolctl import threadpool_limits
-        blas_ctx = threadpool_limits(limits=1, user_api='blas')
-    except ImportError:
-        from contextlib import nullcontext
-        blas_ctx = nullcontext()
-    with _w.catch_warnings():
-        _w.simplefilter("ignore")
-        with blas_ctx:
-            (usages, spectra, _) = _nnmf(_SHARED_X, **kw)
-    return (spectra, usages)
+def _factorize_worker(output_dir, name, worker_i, total_workers):
+    """Run factorize() as one parallel cNMF worker, suppressing per-run logs."""
+    import sys
+    import warnings
+    warnings.filterwarnings("ignore")
+    with open(os.devnull, "w") as devnull:
+        sys.stdout = devnull
+        try:
+            obj = cNMF(output_dir=output_dir, name=name)
+            obj.factorize(worker_i=worker_i, total_workers=total_workers)
+        finally:
+            sys.stdout = sys.__stdout__
 
 
 # ---------------------------------------------------------------------------
@@ -77,48 +65,62 @@ def _env_info(n_workers):
     lines = []
     try:
         import sklearn
-        lines.append(f"  sklearn  : {sklearn.__version__}  ({n_workers} workers, 1 BLAS thread each)")
+        lines.append(f"  sklearn  : {sklearn.__version__}  ({n_workers} parallel workers)")
     except ImportError:
         lines.append("  sklearn  : NOT INSTALLED")
-
     try:
         import torch
-        cuda_ok = torch.cuda.is_available()
-        if cuda_ok:
-            dev_name = torch.cuda.get_device_name(0)
-            lines.append(f"  torch    : {torch.__version__}  (device: {dev_name})")
+        if torch.cuda.is_available():
+            lines.append(f"  torch    : {torch.__version__}  "
+                         f"(device: {torch.cuda.get_device_name(0)})")
         else:
             lines.append(f"  torch    : {torch.__version__}  (device: cpu — no CUDA)")
     except ImportError:
         lines.append("  torch    : NOT INSTALLED")
-
     try:
         import torchnmf
         lines.append(f"  torchnmf : {torchnmf.__version__}")
     except ImportError:
         lines.append("  torchnmf : NOT INSTALLED  (torch backend will be skipped)")
-
     return "\n".join(lines)
 
 
-def _recon_error(X, spectra, usages):
-    """Frobenius reconstruction error ||X - usages @ spectra||_F."""
-    if sp.issparse(X):
-        X_dense = X.toarray().astype(np.float64)
-    else:
-        X_dense = np.array(X, dtype=np.float64)
-    approx = usages.astype(np.float64) @ spectra.astype(np.float64)
-    diff = X_dense - approx
-    return float(np.sqrt((diff ** 2).sum()))
+def _run_parallel_factorize(output_dir, name, n_workers):
+    """
+    Spawn n_workers processes that each call factorize(worker_i=i, total_workers=n_workers).
+    Returns total wall-clock time in seconds.
+    """
+    procs = [
+        Process(target=_factorize_worker, args=(output_dir, name, i, n_workers))
+        for i in range(n_workers)
+    ]
+    t0 = time.perf_counter()
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join()
+    elapsed = time.perf_counter() - t0
+    if any(p.exitcode != 0 for p in procs):
+        raise RuntimeError("One or more factorize workers exited with errors.")
+    return elapsed
 
 
-def _build_nmf_kwargs(base_kwargs, k, seed, use_torch):
-    """Clone base_kwargs, set n_components / random_state / use_torch."""
-    kw = dict(base_kwargs)
-    kw['n_components'] = k
-    kw['random_state'] = seed
-    kw['use_torch'] = use_torch
-    return kw
+def _prepare(base_tmpdir, run_name, counts_fn, k, n_iter, seed, nhvg,
+             use_torch, beta_loss):
+    """Prepare a fresh cNMF run directory and return the cNMF object."""
+    output_dir = os.path.join(base_tmpdir, run_name)
+    os.makedirs(output_dir, exist_ok=True)
+    obj = cNMF(output_dir=output_dir, name=run_name)
+    obj.prepare(
+        counts_fn=counts_fn,
+        components=[k],
+        n_iter=n_iter,
+        seed=seed,
+        num_highvar_genes=nhvg,
+        beta_loss=beta_loss,
+        use_torch=use_torch,
+    )
+    return obj
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +129,10 @@ def _build_nmf_kwargs(base_kwargs, k, seed, use_torch):
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Benchmark sklearn (parallel CPU) vs PyTorch (GPU) cNMF backends.",
+        description=(
+            "Benchmark sklearn (parallel CPU) vs PyTorch (GPU) cNMF backends "
+            "using the actual factorize() pipeline."
+        ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--counts-fn", default=None,
@@ -139,22 +144,19 @@ def parse_args():
                    help="Number of genes for synthetic data.")
     p.add_argument("--k-values", type=int, nargs="+", default=[5, 10, 15, 20],
                    help="K (number of components) values to benchmark.")
-    p.add_argument("--n-timing-runs", type=int, default=None,
-                   help="Total NMF calls per (backend, K). For sklearn these are "
-                        "distributed across --n-workers processes; for torch they "
-                        "run sequentially on the GPU.  Defaults to --n-workers so "
-                        "every worker runs exactly one job simultaneously.")
+    p.add_argument("--n-iter", type=int, default=None,
+                   help="Total NMF iterations per K run by each backend "
+                        "(default: --n-workers, so each sklearn worker handles "
+                        "exactly one iteration).")
     p.add_argument("--n-workers", type=int, default=None,
-                   help="CPU worker processes for sklearn (default: os.cpu_count()). "
-                        "Set to 1 to benchmark serial sklearn instead.")
-    p.add_argument("--seed", type=int, default=14,
-                   help="Random seed.")
+                   help="Parallel sklearn worker processes (default: os.cpu_count()).")
+    p.add_argument("--seed", type=int, default=14, help="Random seed.")
     p.add_argument("--beta-loss", default="frobenius",
                    choices=["frobenius", "kullback-leibler"],
                    help="NMF beta-loss function.")
     p.add_argument("--output-dir", default=None,
-                   help="Working directory for cNMF intermediate files. "
-                        "Defaults to a temporary directory that is deleted afterwards.")
+                   help="Working directory for cNMF files. "
+                        "Defaults to a temporary directory deleted afterwards.")
     p.add_argument("--output-csv", default=None,
                    help="Optional path to write results as a CSV file.")
     return p.parse_args()
@@ -163,7 +165,7 @@ def parse_args():
 def main():
     args = parse_args()
     n_workers = args.n_workers if args.n_workers is not None else os.cpu_count()
-    n_timing_runs = args.n_timing_runs if args.n_timing_runs is not None else n_workers
+    n_iter = args.n_iter if args.n_iter is not None else n_workers
 
     torch_available = True
     try:
@@ -178,9 +180,6 @@ def main():
     print(_env_info(n_workers))
     print()
 
-    # ------------------------------------------------------------------
-    # Working directory
-    # ------------------------------------------------------------------
     cleanup_tmpdir = False
     if args.output_dir is None:
         tmpdir = tempfile.mkdtemp(prefix="cnmf_bench_")
@@ -189,7 +188,6 @@ def main():
         tmpdir = args.output_dir
         os.makedirs(tmpdir, exist_ok=True)
 
-    pool = None
     try:
         # ------------------------------------------------------------------
         # Counts data
@@ -198,151 +196,108 @@ def main():
             counts_fn = args.counts_fn
             print(f"Using counts file: {counts_fn}")
         else:
-            import scanpy as sc
+            import anndata
             print(f"Generating synthetic data: {args.n_cells} cells × {args.n_genes} genes")
             np.random.seed(args.seed)
             data = np.random.binomial(
                 n=100, p=0.01, size=(args.n_cells, args.n_genes)
             ).astype(np.int64)
-            import anndata
             adata = anndata.AnnData(X=sp.csr_matrix(data))
             counts_fn = os.path.join(tmpdir, "synthetic_counts.h5ad")
             adata.write_h5ad(counts_fn)
 
+        nhvg = min(2000, args.n_genes if args.counts_fn is None else 99999)
+
         # ------------------------------------------------------------------
-        # Prepare (shared between both backends)
+        # Determine norm counts shape by running one prepare() for the
+        # smallest K; this result is reused in the benchmark loop below.
         # ------------------------------------------------------------------
         print("Running prepare()…", flush=True)
-        cnmf_obj = cNMF(output_dir=tmpdir, name="bench")
-        max_k = max(args.k_values)
-        nhvg = min(2000, args.n_genes if args.counts_fn is None else 99999)
-        cnmf_obj.prepare(
-            counts_fn=counts_fn,
-            components=[max_k],   # only need norm_counts, K doesn't matter here
-            n_iter=1,
-            seed=args.seed,
-            beta_loss=args.beta_loss,
-            num_highvar_genes=nhvg,
-            use_torch=False,
+        first_k = sorted(args.k_values)[0]
+        sk_obj_first = _prepare(
+            tmpdir, f"sk_k{first_k}", counts_fn, first_k, n_iter,
+            args.seed, nhvg, use_torch=False, beta_loss=args.beta_loss,
         )
-
         import scanpy as sc
-        norm_counts = sc.read(cnmf_obj.paths['normalized_counts'])
-        X = norm_counts.X
-
-        with open(cnmf_obj.paths['nmf_run_parameters']) as f:
-            base_kwargs = yaml.safe_load(f)
-        # Remove keys that will be set per-run
-        for key in ('n_components', 'random_state', 'use_torch'):
-            base_kwargs.pop(key, None)
-
-        n_cells, n_genes = X.shape
+        norm_counts = sc.read(sk_obj_first.paths['normalized_counts'])
+        n_cells, n_genes = norm_counts.shape
         print(f"Norm counts shape: {n_cells} cells × {n_genes} HVGs")
         print()
-
-        # ------------------------------------------------------------------
-        # Start the sklearn worker pool once (X is sent to workers via the
-        # initializer, not re-pickled for every task).
-        # ------------------------------------------------------------------
-        if n_workers > 1:
-            pool = Pool(n_workers, initializer=_pool_init, initargs=(X,))
-        else:
-            _pool_init(X)   # set global for the in-process fallback
 
         # ------------------------------------------------------------------
         # Benchmark loop
         # ------------------------------------------------------------------
         results = []
-        col_w = [5, 22, 22, 10, 14, 14]
-
+        col_w = [5, 22, 22, 10]
         sk_label = f"sklearn total ({n_workers}w)"
         tr_label = "torch total (GPU)"
         header = (
             f"{'K':<{col_w[0]}} "
             f"{sk_label:<{col_w[1]}} "
             f"{tr_label:<{col_w[2]}} "
-            f"{'speedup':<{col_w[3]}} "
-            f"{'sklearn err':<{col_w[4]}} "
-            f"{'torch err':<{col_w[5]}}"
+            f"{'speedup':<{col_w[3]}}"
         )
         separator = "-" * len(header)
-        summary_label = (
-            f"n_cells={n_cells}, n_genes={n_genes}, "
-            f"n_timing_runs={n_timing_runs}, n_workers={n_workers}, "
-            f"beta_loss={args.beta_loss}"
-        )
-        print(f"Benchmark  ({summary_label})")
-        print(f"  sklearn: {n_timing_runs} jobs across {n_workers} processes, "
-              f"each pinned to 1 BLAS thread")
+
+        print(f"Benchmark  (n_iter={n_iter} per K, n_workers={n_workers}, "
+              f"beta_loss={args.beta_loss})")
+        print(f"  sklearn: factorize() distributed across {n_workers} parallel workers")
         if torch_available:
-            print(f"  torch  : {n_timing_runs} jobs sequentially on GPU")
+            print(f"  torch  : factorize() in 1 process on GPU ({n_iter} sequential calls)")
         print()
         print(header)
         print(separator)
 
-        # Warm up the GPU before timing to avoid first-call initialization overhead.
-        if torch_available:
-            kw_warmup = _build_nmf_kwargs(base_kwargs, sorted(args.k_values)[0], args.seed, use_torch=True)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                cnmf_obj._nmf(X, kw_warmup)
-
         for k in sorted(args.k_values):
             row = {'k': k}
 
-            # --- sklearn (parallel pool or single-process fallback) ---
-            job_kwargs = [
-                _build_nmf_kwargs(base_kwargs, k, args.seed + i, use_torch=False)
-                for i in range(n_timing_runs)
-            ]
-            if pool is not None:
-                t0 = time.perf_counter()
-                sk_results = pool.map(_sklearn_nmf_worker, job_kwargs)
-                sk_total = time.perf_counter() - t0
+            # --- sklearn ---
+            # Reuse the already-prepared first_k directory; prepare() the rest.
+            if k == first_k:
+                sk_run_dir = os.path.join(tmpdir, f"sk_k{k}")
             else:
-                t0 = time.perf_counter()
-                sk_results = [_sklearn_nmf_worker(kw) for kw in job_kwargs]
-                sk_total = time.perf_counter() - t0
-            spectra, usages = sk_results[-1]
-            sk_err = _recon_error(X, spectra, usages)
-            row['sklearn_total'] = sk_total
-            row['sklearn_err'] = sk_err
+                sk_obj = _prepare(
+                    tmpdir, f"sk_k{k}", counts_fn, k, n_iter,
+                    args.seed, nhvg, use_torch=False, beta_loss=args.beta_loss,
+                )
+                sk_run_dir = os.path.join(tmpdir, f"sk_k{k}")
 
-            # --- torch (sequential; GPU parallelises internally) ---
+            sk_time = _run_parallel_factorize(sk_run_dir, f"sk_k{k}", n_workers)
+            row['sklearn_total'] = sk_time
+
+            # --- torch ---
             if torch_available:
-                tr_total = 0.0
-                with warnings.catch_warnings():
+                import warnings
+                tr_obj = _prepare(
+                    tmpdir, f"tr_k{k}", counts_fn, k, n_iter,
+                    args.seed, nhvg, use_torch=True, beta_loss=args.beta_loss,
+                )
+                with warnings.catch_warnings(), open(os.devnull, "w") as devnull:
                     warnings.simplefilter("ignore")
-                    for i in range(n_timing_runs):
-                        kw = _build_nmf_kwargs(base_kwargs, k, args.seed + i, use_torch=True)
+                    sys.stdout = devnull
+                    try:
                         t0 = time.perf_counter()
-                        spectra_t, usages_t = cnmf_obj._nmf(X, kw)
-                        tr_total += time.perf_counter() - t0
-                tr_err = _recon_error(X, spectra_t, usages_t)
-                row['torch_total'] = tr_total
-                row['torch_err'] = tr_err
-                speedup = sk_total / tr_total
+                        tr_obj.factorize()
+                        tr_time = time.perf_counter() - t0
+                    finally:
+                        sys.stdout = sys.__stdout__
+                row['torch_total'] = tr_time
+                speedup = sk_time / tr_time
                 row['speedup'] = speedup
-                torch_str = f"{tr_total:.3f}s"
+                torch_str = f"{tr_time:.3f}s"
                 speedup_str = f"{speedup:.1f}x"
-                torch_err_str = f"{tr_err:.3e}"
             else:
-                row['torch_total'] = row['torch_err'] = row['speedup'] = float('nan')
+                row['torch_total'] = row['speedup'] = float('nan')
                 torch_str = "n/a (not installed)"
                 speedup_str = "n/a"
-                torch_err_str = "n/a"
 
             results.append(row)
-
-            sk_str = f"{sk_total:.3f}s"
-            sk_err_str = f"{sk_err:.3e}"
+            sk_str = f"{sk_time:.3f}s"
             print(
                 f"{k:<{col_w[0]}} "
                 f"{sk_str:<{col_w[1]}} "
                 f"{torch_str:<{col_w[2]}} "
-                f"{speedup_str:<{col_w[3]}} "
-                f"{sk_err_str:<{col_w[4]}} "
-                f"{torch_err_str:<{col_w[5]}}"
+                f"{speedup_str:<{col_w[3]}}"
             )
 
         print()
@@ -352,8 +307,7 @@ def main():
         # ------------------------------------------------------------------
         if args.output_csv:
             import csv
-            fieldnames = ['k', 'sklearn_total', 'sklearn_err',
-                          'torch_total', 'torch_err', 'speedup']
+            fieldnames = ['k', 'sklearn_total', 'torch_total', 'speedup']
             with open(args.output_csv, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
                 writer.writeheader()
@@ -361,9 +315,6 @@ def main():
             print(f"Results written to: {args.output_csv}")
 
     finally:
-        if pool is not None:
-            pool.terminate()
-            pool.join()
         if cleanup_tmpdir:
             shutil.rmtree(tmpdir, ignore_errors=True)
 

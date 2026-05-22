@@ -110,7 +110,7 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 
 **Notes:**
 - Requires `pip install torchnmf` (or `pip install cnmf[torch]`).
-- **Recommended for large K (≥10) when a CUDA or ROCm GPU is available.** At small K, parallel sklearn workers can outperform the sequential GPU calls because each NMF job converges quickly. At large K the GPU's per-call efficiency dominates (3–5× faster than 24 parallel sklearn workers on PBMC3k — see benchmark below).
+- **Recommended for large K (≥10) when a CUDA or ROCm GPU is available.** At small K, parallel sklearn workers outperform sequential GPU calls because each job converges quickly. At large K the GPU's per-call efficiency dominates: 3–4× faster than 24 parallel sklearn workers on PBMC3k (see benchmark below).
 - GPU acceleration is automatic when a CUDA device is present; no code changes are needed.
 - `beta_loss='frobenius'` (beta=2) and `beta_loss='kullback-leibler'` (beta=1) are both supported.
 - Results are computed in **float32** (vs float64 for sklearn). Outputs are numerically comparable but not bit-for-bit identical between backends; this is acceptable because cNMF averages over many random restarts in the consensus step.
@@ -119,22 +119,21 @@ usage, spectra_scores, spectra_tpm, top_genes = cnmf_obj.load_results(K=10, dens
 
 ### GPU benchmark (PBMC3k, 2700 cells × 2000 HVGs, AMD Radeon RX 7800 XT)
 
-Measured with `Extras/benchmark_backends.py`, frobenius loss.  Both backends complete the same total
-number of NMF calls (equal to the number of CPU cores, 24 here): sklearn distributes them across 24
-parallel workers each pinned to 1 BLAS thread (matching `factorize --total-workers 24`); torch runs
-them sequentially on the GPU.  Speedup < 1 means sklearn is faster; > 1 means GPU wins.
+Measured with `Extras/benchmark_backends.py`, frobenius loss.  Both backends complete 24 NMF iterations
+per K: sklearn uses `factorize(worker_i=i, total_workers=24)` across 24 parallel processes (identical
+to `cnmf factorize --total-workers 24 --worker-index i`); torch runs all 24 iterations sequentially
+in one process on the GPU.  Speedup < 1 means sklearn is faster; > 1 means GPU wins.
 
-| K  | sklearn total (24w) | torch total (GPU) | speedup | sklearn err | torch err |
-|----|---------------------|-------------------|---------|-------------|-----------|
-| 5  | 1.058s              | 1.494s            | 0.7×    | 2.242e+03   | 2.245e+03 |
-| 7  | 0.593s              | 1.526s            | 0.4×    | 2.232e+03   | 2.233e+03 |
-| 10 | 5.257s              | 1.525s            | 3.4×    | 2.222e+03   | 2.226e+03 |
-| 15 | 7.385s              | 1.552s            | 4.8×    | 2.210e+03   | 2.218e+03 |
+| K  | sklearn total (24w) | torch total (GPU) | speedup |
+|----|---------------------|-------------------|---------|
+| 5  | 0.924s              | 1.806s            | 0.5×    |
+| 7  | 0.842s              | 1.651s            | 0.5×    |
+| 10 | 5.047s              | 1.604s            | 3.1×    |
+| 15 | 6.739s              | 1.673s            | 4.0×    |
 
-Reconstruction errors (Frobenius norm) are comparable between backends despite the float32 vs float64
-difference.  At small K, parallel sklearn wins because each NMF call converges quickly and 24 workers
-finish 24 jobs in roughly one call's time.  At large K, the GPU's per-call efficiency dominates: torch
-finishes 24 sequential calls faster than sklearn workers can complete their slower individual jobs.
+At small K, 24 parallel sklearn workers finish 24 short jobs in roughly one job's time and beat the GPU.
+At large K, the GPU's per-call efficiency dominates: torch completes 24 sequential iterations faster
+than sklearn workers finish their individually slower jobs.
 
 Output data files will all be available in the ./example_data/example_cNMF directory including:
 
