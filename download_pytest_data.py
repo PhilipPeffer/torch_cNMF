@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import urllib.request
 import tarfile
-import subprocess
+import zipfile
 
 def download_file(url, dest_path):
     """

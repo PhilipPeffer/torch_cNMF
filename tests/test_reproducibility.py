@@ -62,7 +62,10 @@ def test_cnmf_end_to_end(cnmf_instance, dataset_config, tmp_path):
     """
     Single end-to-end test that runs the cNMF pipeline for multiple example datasets.
     """
-   
+    counts_file = dataset_config["counts_file"]
+    if not os.path.exists(counts_file):
+        pytest.skip(f"Test data not found: {counts_file} — run download_pytest_data.py first")
+
     cnmf_instance.prepare(
         counts_fn=dataset_config["counts_file"],
         components=dataset_config["k_values"],

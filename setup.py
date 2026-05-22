@@ -21,9 +21,9 @@ setuptools.setup(
     description="Consensus NMF for scRNA-Seq data",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/dylkot/cNMF",
+    url="https://github.com/PhilipPeffer/torch_cNMF",
     project_urls={
-        "Bug Tracker": "https://github.com/dylkot/cNMF/issues",
+        "Bug Tracker": "https://github.com/PhilipPeffer/torch_cNMF/issues",
     },
     classifiers=[
         "Programming Language :: Python :: 3",
